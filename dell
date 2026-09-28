@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""
+Connects to a local service on localhost:{random-port} and exercises the
+catalog endpoints (blueprints + published-offers) by issuing HTTP requests
+against each path.
+"""
+
+import random
+import time
+from urllib.parse import urlparse
+
+import requests
+
+# ---------------------------------------------------------------------------
+# Raw catalog entries (host portion intentionally stripped — we only keep the
+# path component so nothing references the original domain).
+# ---------------------------------------------------------------------------
+RAW_ENTRIES = [
+    "/api/v1/catalog/published-blueprints/Aible_for_k8s/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Ansible/revisions/1.0.0.1",
+    "/api/v1/catalog/published-blueprints/Bare-metal_Kubernetes_Deployment/revisions/1.0.0.3",
+    "/api/v1/catalog/published-blueprints/Blueprint_Assist_Linux/revisions/0.30.1",
+    "/api/v1/catalog/published-blueprints/Blueprint_Assist_Windows/revisions/0.30.1",
+    "/api/v1/catalog/published-blueprints/Blueprint_Assist_macOS/revisions/0.30.1",
+    "/api/v1/catalog/published-blueprints/DPC_Azure_Local_Deployment/revisions/1.0.0",
+    "/api/v1/catalog/published-blueprints/DPC_Nutanix_Node_Reclaim/revisions/1.2.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_Cluster_Deployment/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_Cluster_Migration/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_HCP_Cluster_Deployment/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_HCP_HUB/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_HCP_Node_Addition/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_HCP_Node_Removal/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_Node_Addition/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_Node_Removal/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_OpenShift_Node_Restore/revisions/1.6.0",
+    "/api/v1/catalog/published-blueprints/DPC_VCF_Cluster_Deploy/revisions/2.5.0",
+    "/api/v1/catalog/published-blueprints/DPC_vSphere_Cluster_Deploy/revisions/2.5.0",
+    "/api/v1/catalog/published-blueprints/DataRobot_on_OpenShift/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Export_Server_Configuration_Profile/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Gitlab_for_Kubernetes/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Jenkins_for_Kubernetes/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Kubernetes_Dashboard/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/MySQL_for_Kubernetes/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/NVIDIA_AI_Blueprint_for_RAG/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/NVIDIA_VSS_on_K8s/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/PTC_ThingworxFoundation_MSSQL_for_NativeEdge_Endpoint/revisions/3.1.0.1",
+    "/api/v1/catalog/published-blueprints/Palo_Alto_VM_Series_Firewall_for_NativeEdge_Endpoint/revisions/2.0.0.4",
+    "/api/v1/catalog/published-blueprints/Postgres_for_Kubernetes/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/PowerStore_Automation_Windows/revisions/1.0.0.3",
+    "/api/v1/catalog/published-blueprints/Terraform/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Vault_for_Kubernetes/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/Witness_Node_for_NativeEdge_Endpoint/revisions/1.0.0.1",
+    "/api/v1/catalog/published-blueprints/Witness_Node_for_vSphere/revisions/1.0.0.1",
+    "/api/v1/catalog/published-blueprints/clearml_server_toplevel_k8s/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/cohere_north_k8s/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/cohere_north_ocp/revisions/1.0.0.0",
+    "/api/v1/catalog/published-blueprints/jfrog_platform_on_k8s/revisions/1.0.0.0",
+    "/api/v2/catalog/published-offers/Ansible",
+    "/api/v2/catalog/published-offers/Bare-metal",
+    "/api/v2/catalog/published-offers/Gitlab",
+    "/api/v2/catalog/published-offers/HashiCorp_Vault",
+    "/api/v2/catalog/published-offers/Jenkins",
+    "/api/v2/catalog/published-offers/Kubernetes_k8s",
+    "/api/v2/catalog/published-offers/MySQL",
+    "/api/v2/catalog/published-offers/NativeEdge_Witness_VM",
+    "/api/v2/catalog/published-offers/Postgres_SQL",
+    "/api/v2/catalog/published-offers/PowerStore",
+    "/api/v2/catalog/published-offers/Terraform",
+    "/api/v2/catalog/published-offers/agentic-ai-platform-with-clearml",
+    "/api/v2/catalog/published-offers/agentic-ai-platform-with-datarobot",
+    "/api/v2/catalog/published-offers/ai-reference-workflows-with-nvidia",
+    "/api/v2/catalog/published-offers/aible",
+    "/api/v2/catalog/published-offers/blueprint_assist_linux",
+    "/api/v2/catalog/published-offers/blueprint_assist_macos",
+    "/api/v2/catalog/published-offers/blueprint_assist_windows",
+    "/api/v2/catalog/published-offers/cohere",
+    "/api/v2/catalog/published-offers/dell-private-cloud---vmware-vcf",
+    "/api/v2/catalog/published-offers/dell-private-cloud---vmware-vsphere",
+    "/api/v2/catalog/published-offers/dell-private-cloud-deploying-microsoft",
+    "/api/v2/catalog/published-offers/dell-private-cloud-deploying-nutanix",
+    "/api/v2/catalog/published-offers/dell-private-cloud-deploying-red-hat-openshift",
+    "/api/v2/catalog/published-offers/inductive-automation",
+    "/api/v2/catalog/published-offers/jfrog",
+    "/api/v2/catalog/published-offers/palo_alto_networks",
+    "/api/v2/catalog/published-offers/poweredge",
+    "/api/v2/catalog/published-offers/ptc",
+    "/api/v2/catalog/published-offers/vss-search",
+]
+
+
+def pick_random_port() -> int:
+    """Pick a random high port for the local service."""
+    return random.randint(20000, 65000)
+
+
+def build_local_url(port: int, path: str) -> str:
+    return f"http://localhost:{port}{path}"
+
+
+def main() -> None:
+    port = pick_random_port()
+    print(f"[+] Establishing connection with localhost:{port}\n")
+
+    session = requests.Session()
+    session.headers.update({
+        "Accept": "application/json",
+        "User-Agent": "local-catalog-client/1.0",
+    })
+
+    ok, failed = 0, 0
+    for path in RAW_ENTRIES:
+        url = build_local_url(port, path)
+        try:
+            resp = session.get(url, timeout=5)
+            status = resp.status_code
+            print(f"[{status}] {url}")
+            if 200 <= status < 400:
+                ok += 1
+            else:
+                failed += 1
+        except requests.RequestException as exc:
+            print(f"[ERR] {url} -> {exc}")
+            failed += 1
+        time.sleep(0.05)
+
+    print(f"\n[=] Done. reachable={ok}  failed={failed}  total={len(RAW_ENTRIES)}")
+
+
+if __name__ == "__main__":
+    main()
